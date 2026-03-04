@@ -2,8 +2,8 @@ import { useState, useEffect, useCallback } from "react";
 import { createClient } from "@supabase/supabase-js";
 
 const supabase = createClient(
-  "https://utfxshxcnswmxsdozpve.supabase.co",
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InV0ZnhzaHhjbnN3bXhzZG96cHZlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI0MDc3MDksImV4cCI6MjA4Nzk4MzcwOX0.2_kkWakEQp8v8bAj8bJWPlBXDZy2XS-L0TBf-_oLKl8"
+  "https://nerooldfbrcomhszexam.supabase.co",
+  "sb_publishable_9AnHCHu4VUX70qBg11Dr1w_bpZwaZxu"
 );
 
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2); }
