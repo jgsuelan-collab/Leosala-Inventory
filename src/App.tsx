@@ -1,9 +1,9 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { createClient } from "@supabase/supabase-js";
 
 const supabase = createClient(
   "https://nerooldfbrcomhszexam.supabase.co",
-  "sb_publishable_9AnHCHu4VUX70qBg11Dr1w_bpZwaZxu"
+  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5lcm9vbGRmYnJjb21oc3pleGFtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI1NzYzNTEsImV4cCI6MjA4ODE1MjM1MX0.RcPxwcZ8q5KBprAlZfIxJYtf94DkMWPKlelqDiWpp34"
 );
 
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2); }
@@ -103,6 +103,314 @@ function AuthScreen({ onLogin }: { onLogin: (user: any) => void }) {
   );
 }
 
+// ─── INVENTORY COUNT SCREEN ───────────────────────────────────────────────────
+type CountStep = "count" | "compare" | "done";
+
+function InventoryCountScreen({
+  items,
+  checkers,
+  onApply,
+  onCancel,
+  S,
+}: {
+  items: any[];
+  checkers: string[];
+  onApply: (counted: Record<string, number>, checker: string) => void;
+  onCancel: () => void;
+  S: Record<string, React.CSSProperties>;
+}) {
+  const [step, setStep] = useState<CountStep>("count");
+  const [counted, setCounted] = useState<Record<string, string>>(() => {
+    const init: Record<string, string> = {};
+    items.forEach(i => { init[i.id] = ""; });
+    return init;
+  });
+  const [search, setSearch] = useState("");
+  const [whFilter, setWhFilter] = useState("All");
+  const [checker, setChecker] = useState("");
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const inputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+
+  const warehouses = ["All", ...Array.from(new Set(items.map((i: any) => i.warehouse)))];
+
+  const filtered = items.filter(i => {
+    const matchSearch = !search || i.name.toLowerCase().includes(search.toLowerCase()) || (i.category || "").toLowerCase().includes(search.toLowerCase());
+    const matchWh = whFilter === "All" || i.warehouse === whFilter;
+    return matchSearch && matchWh;
+  });
+
+  const countedList = items.filter(i => counted[i.id] !== "" && counted[i.id] !== undefined);
+  const uncountedCount = items.length - countedList.length;
+
+  const compareData = items.map(i => {
+    const countedQty = counted[i.id] !== "" && counted[i.id] !== undefined ? parseInt(counted[i.id]) : null;
+    const variance = countedQty !== null ? countedQty - i.qty : null;
+    return { ...i, countedQty, variance };
+  });
+
+  const withVariance = compareData.filter(i => i.variance !== null && i.variance !== 0);
+  const matches = compareData.filter(i => i.variance === 0);
+  const skipped = compareData.filter(i => i.variance === null);
+  const over = withVariance.filter(i => i.variance > 0);
+  const under = withVariance.filter(i => i.variance < 0);
+
+  function handleInput(id: string, val: string) {
+    if (val === "" || /^\d+$/.test(val)) setCounted(prev => ({ ...prev, [id]: val }));
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent, id: string) {
+    if (e.key === "Enter" || e.key === "ArrowDown") {
+      const idx = filtered.findIndex(i => i.id === id);
+      if (idx < filtered.length - 1) inputRefs.current[filtered[idx + 1].id]?.focus();
+    }
+    if (e.key === "ArrowUp") {
+      const idx = filtered.findIndex(i => i.id === id);
+      if (idx > 0) inputRefs.current[filtered[idx - 1].id]?.focus();
+    }
+  }
+
+  function applyCount() {
+    const result: Record<string, number> = {};
+    items.forEach(i => {
+      if (counted[i.id] !== "" && counted[i.id] !== undefined) {
+        result[i.id] = parseInt(counted[i.id]);
+      }
+    });
+    onApply(result, checker);
+  }
+
+  // ── STEP: COUNT ──
+  if (step === "count") return (
+    <div style={{ fontFamily: "'DM Sans', sans-serif", background: "#faf7f2", minHeight: "100vh" }}>
+      {/* Header */}
+      <div style={{ background: "#2d5016", color: "#fff", padding: "16px 20px 10px", position: "sticky", top: 0, zIndex: 100, boxShadow: "0 2px 20px rgba(0,0,0,.15)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+          <div>
+            <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 18 }}>📋 Inventory Count</div>
+            <div style={{ fontSize: 10, opacity: .65, letterSpacing: 1.2, textTransform: "uppercase", marginTop: 1 }}>{countedList.length} of {items.length} items counted</div>
+          </div>
+          <button onClick={onCancel} style={{ ...S.btn, background: "rgba(255,255,255,.12)", color: "#fff", fontSize: 11, padding: "5px 12px" }}>✕ Cancel</button>
+        </div>
+        {/* Progress bar */}
+        <div style={{ background: "rgba(255,255,255,.2)", borderRadius: 99, height: 6 }}>
+          <div style={{ background: "#ffd166", height: 6, borderRadius: 99, width: `${(countedList.length / items.length) * 100}%`, transition: "width .3s" }} />
+        </div>
+      </div>
+
+      <div style={{ padding: 16, maxWidth: 680, margin: "0 auto", paddingBottom: 110 }}>
+        {/* Checker selector */}
+        <div style={S.card}>
+          <span style={S.label}>👤 Checker / Person Counting</span>
+          {checkers.length > 0 ? (
+            <select style={{ ...S.input, appearance: "none" }} value={checker} onChange={e => setChecker(e.target.value)}>
+              <option value="">— Select checker (optional) —</option>
+              {checkers.map((c: string) => <option key={c} value={c}>{c}</option>)}
+            </select>
+          ) : (
+            <input style={S.input} placeholder="Enter checker name (optional)" value={checker} onChange={e => setChecker(e.target.value)} />
+          )}
+        </div>
+
+        {/* Tip */}
+        <div style={{ background: "#fff8e1", border: "1px solid #ffe082", borderRadius: 10, padding: "10px 14px", marginBottom: 12, fontSize: 12, color: "#795548" }}>
+          💡 Enter the qty you physically counted. Press <strong>Enter</strong> to jump to next item. Leave blank to keep the current app qty.
+        </div>
+
+        {/* Search + warehouse filter */}
+        <input style={{ ...S.input, marginBottom: 10, background: "#fff" }} placeholder="🔍 Search items..." value={search} onChange={e => setSearch(e.target.value)} />
+        <div style={{ display: "flex", gap: 8, overflowX: "auto", scrollbarWidth: "none", marginBottom: 12 }}>
+          {warehouses.map(w => (
+            <div key={w} onClick={() => setWhFilter(w)} style={{ background: whFilter === w ? "#2d5016" : "#fff", border: `1.5px solid ${whFilter === w ? "#2d5016" : "#e8e0d0"}`, borderRadius: 100, padding: "7px 16px", fontSize: 12, fontWeight: 500, cursor: "pointer", whiteSpace: "nowrap", color: whFilter === w ? "#fff" : "#5a5a5a" }}>{w}</div>
+          ))}
+        </div>
+
+        {/* Items count list */}
+        {filtered.map((item: any) => {
+          const val = counted[item.id];
+          const hasCounted = val !== "" && val !== undefined;
+          return (
+            <div key={item.id} style={{ ...S.card, display: "flex", alignItems: "center", gap: 12, background: hasCounted ? "#f0fdf4" : "#fff", borderLeft: `3px solid ${hasCounted ? "#2d5016" : "#e8e0d0"}`, transition: "all .2s", marginBottom: 8 }}>
+              <div style={{ fontSize: 18, flexShrink: 0 }}>{hasCounted ? "✅" : "⬜"}</div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 600, fontSize: 14, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{item.name}</div>
+                <div style={{ fontSize: 10, color: "#9a9a9a", textTransform: "uppercase", letterSpacing: .8, marginTop: 1 }}>{item.category} · {item.warehouse}</div>
+                <div style={{ fontSize: 11, color: "#5a5a5a", marginTop: 2 }}>App qty: <strong style={{ color: "#2d5016" }}>{item.qty}</strong></div>
+              </div>
+              <div style={{ flexShrink: 0, textAlign: "center" }}>
+                <div style={{ fontSize: 9, color: "#9a9a9a", textTransform: "uppercase", letterSpacing: .5, marginBottom: 3 }}>Counted</div>
+                <input
+                  ref={el => { inputRefs.current[item.id] = el; }}
+                  type="number"
+                  min="0"
+                  placeholder="—"
+                  value={val ?? ""}
+                  onChange={e => handleInput(item.id, e.target.value)}
+                  onKeyDown={e => handleKeyDown(e, item.id)}
+                  style={{ border: `2px solid ${hasCounted ? "#2d5016" : "#e8e0d0"}`, borderRadius: 8, padding: "7px 6px", fontSize: 15, width: 64, textAlign: "center", fontWeight: 700, outline: "none", fontFamily: "'DM Sans', sans-serif", background: "#fff" }}
+                />
+              </div>
+            </div>
+          );
+        })}
+
+        {/* Quick reset card */}
+        <div style={{ ...S.card, border: "1.5px solid #fdecea", marginTop: 8 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: "#c0392b", marginBottom: 6, textTransform: "uppercase", letterSpacing: .8 }}>⚠️ Quick Reset</div>
+          <div style={{ fontSize: 13, color: "#5a5a5a", marginBottom: 12 }}>Set all item quantities to 0 right now. Items stay in the list.</div>
+          <button onClick={() => setShowResetConfirm(true)} style={{ ...S.btn, background: "transparent", color: "#c0392b", border: "1.5px solid #fdecea", width: "100%", textAlign: "center" }}>🗑️ Reset All Quantities to Zero</button>
+        </div>
+      </div>
+
+      {/* Bottom action bar */}
+      <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, background: "#fff", borderTop: "1px solid #e8e0d0", padding: "12px 16px", boxShadow: "0 -4px 20px rgba(0,0,0,.08)", zIndex: 100 }}>
+        <button onClick={() => setStep("compare")} style={{ ...S.btn, background: "#2d5016", color: "#fff", width: "100%", textAlign: "center", fontSize: 14, padding: "14px 0" }}>
+          View Comparison & Variance →
+        </button>
+        {uncountedCount > 0 && (
+          <div style={{ textAlign: "center", fontSize: 11, color: "#9a9a9a", marginTop: 6 }}>
+            {uncountedCount} item{uncountedCount > 1 ? "s" : ""} not counted — will keep current qty
+          </div>
+        )}
+      </div>
+
+      {/* Reset confirm modal */}
+      {showResetConfirm && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.45)", zIndex: 300, display: "flex", alignItems: "center", justifyContent: "center", padding: 20, backdropFilter: "blur(2px)" }}>
+          <div style={{ background: "#fff", borderRadius: 20, padding: 24, maxWidth: 360, width: "100%", boxShadow: "0 20px 40px rgba(0,0,0,.2)" }}>
+            <div style={{ textAlign: "center", fontSize: 40, marginBottom: 12 }}>⚠️</div>
+            <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 18, color: "#c0392b", textAlign: "center", marginBottom: 8 }}>Reset All Quantities?</div>
+            <div style={{ fontSize: 13, color: "#5a5a5a", textAlign: "center", marginBottom: 20, lineHeight: 1.6 }}>
+              This will set all <strong>{items.length} items</strong> to <strong>0 qty</strong> immediately. Items stay in the list. This cannot be undone.
+            </div>
+            <div style={{ display: "flex", gap: 10 }}>
+              <button onClick={() => setShowResetConfirm(false)} style={{ ...S.btn, flex: 1, background: "transparent", border: "1.5px solid #e8e0d0", color: "#5a5a5a", textAlign: "center" }}>Cancel</button>
+              <button onClick={() => {
+                const result: Record<string, number> = {};
+                items.forEach(i => { result[i.id] = 0; });
+                onApply(result, checker);
+              }} style={{ ...S.btn, flex: 1, background: "#c0392b", color: "#fff", border: "none", textAlign: "center" }}>Reset to 0</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
+  // ── STEP: COMPARE ──
+  if (step === "compare") return (
+    <div style={{ fontFamily: "'DM Sans', sans-serif", background: "#faf7f2", minHeight: "100vh" }}>
+      <div style={{ background: "#2d5016", color: "#fff", padding: "16px 20px 14px", position: "sticky", top: 0, zIndex: 100, boxShadow: "0 2px 20px rgba(0,0,0,.15)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div>
+            <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 18 }}>📊 Variance Report</div>
+            <div style={{ fontSize: 10, opacity: .65, letterSpacing: 1.2, textTransform: "uppercase", marginTop: 1 }}>Review before applying</div>
+          </div>
+          <button onClick={() => setStep("count")} style={{ ...S.btn, background: "rgba(255,255,255,.12)", color: "#fff", fontSize: 11, padding: "5px 12px" }}>← Edit Count</button>
+        </div>
+      </div>
+
+      <div style={{ padding: 16, maxWidth: 680, margin: "0 auto", paddingBottom: 110 }}>
+        {/* Summary chips */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 8, marginBottom: 14 }}>
+          {[
+            { label: "Over", count: over.length, color: "#2e7d32", bg: "#e8f5e9" },
+            { label: "Under", count: under.length, color: "#c0392b", bg: "#fdecea" },
+            { label: "Match", count: matches.length, color: "#1565c0", bg: "#e3f2fd" },
+            { label: "Skipped", count: skipped.length, color: "#9a9a9a", bg: "#f4f0e8" },
+          ].map(({ label, count, color, bg }) => (
+            <div key={label} style={{ ...S.card, textAlign: "center", padding: "12px 8px", marginBottom: 0, background: bg }}>
+              <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 22, fontWeight: 700, color }}>{count}</div>
+              <div style={{ fontSize: 10, color, fontWeight: 700, textTransform: "uppercase", letterSpacing: .5 }}>{label}</div>
+            </div>
+          ))}
+        </div>
+
+        {checker && (
+          <div style={{ background: "#f4f0e8", borderRadius: 10, padding: "8px 14px", marginBottom: 12, fontSize: 12, color: "#2d5016", display: "flex", alignItems: "center", gap: 6 }}>
+            👤 Counted by: <strong>{checker}</strong>
+          </div>
+        )}
+
+        {/* Items with variance */}
+        {withVariance.length > 0 && (
+          <div style={{ marginBottom: 14 }}>
+            <span style={{ ...S.sectionTitle, fontSize: 14 }}>⚠️ Items with Variance ({withVariance.length})</span>
+            {withVariance.map(item => (
+              <div key={item.id} style={{ ...S.card, borderLeft: `3px solid ${item.variance > 0 ? "#2e7d32" : "#c0392b"}`, background: item.variance > 0 ? "#f0fdf4" : "#fef2f2", marginBottom: 8 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 600, fontSize: 14 }}>{item.name}</div>
+                    <div style={{ fontSize: 10, color: "#9a9a9a", textTransform: "uppercase", letterSpacing: .8 }}>{item.category} · {item.warehouse}</div>
+                    <div style={{ fontSize: 12, color: "#5a5a5a", marginTop: 4 }}>
+                      App: <strong>{item.qty}</strong> → Counted: <strong>{item.countedQty}</strong>
+                    </div>
+                  </div>
+                  <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 22, fontWeight: 700, color: item.variance > 0 ? "#2e7d32" : "#c0392b", flexShrink: 0, paddingLeft: 12 }}>
+                    {item.variance > 0 ? "+" : ""}{item.variance}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Matching items */}
+        {matches.length > 0 && (
+          <div style={{ marginBottom: 14 }}>
+            <span style={{ ...S.sectionTitle, fontSize: 14 }}>✅ Items that Match ({matches.length})</span>
+            {matches.map(item => (
+              <div key={item.id} style={{ ...S.card, borderLeft: "3px solid #2d5016", background: "#f0fdf4", marginBottom: 8 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: 14 }}>{item.name}</div>
+                    <div style={{ fontSize: 10, color: "#9a9a9a", textTransform: "uppercase", letterSpacing: .8 }}>{item.category} · {item.warehouse}</div>
+                  </div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "#2d5016" }}>Qty: {item.qty} ✓</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Skipped */}
+        {skipped.length > 0 && (
+          <div style={{ marginBottom: 14 }}>
+            <span style={{ ...S.sectionTitle, fontSize: 14 }}>⏭ Skipped — Keeping Current Qty ({skipped.length})</span>
+            {skipped.map(item => (
+              <div key={item.id} style={{ ...S.card, borderLeft: "3px solid #e8e0d0", marginBottom: 8 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: 14 }}>{item.name}</div>
+                    <div style={{ fontSize: 10, color: "#9a9a9a", textTransform: "uppercase", letterSpacing: .8 }}>{item.category} · {item.warehouse}</div>
+                  </div>
+                  <div style={{ fontSize: 13, color: "#9a9a9a" }}>Keeps {item.qty}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div style={{ background: "#fff8e1", border: "1px solid #ffe082", borderRadius: 10, padding: "10px 14px", marginBottom: 14, fontSize: 12, color: "#795548" }}>
+          ⚠️ Applying will <strong>replace</strong> app quantities with your physical counts. Skipped items keep their current qty.
+        </div>
+      </div>
+
+      {/* Bottom action bar */}
+      <div style={{ position: "fixed", bottom: 0, left: 0, right: 0, background: "#fff", borderTop: "1px solid #e8e0d0", padding: "12px 16px", boxShadow: "0 -4px 20px rgba(0,0,0,.08)", zIndex: 100 }}>
+        <button onClick={applyCount} style={{ ...S.btn, background: "#2d5016", color: "#fff", width: "100%", textAlign: "center", fontSize: 14, padding: "14px 0", marginBottom: 8 }}>
+          ✓ Apply Count & Update Quantities
+        </button>
+        <button onClick={onCancel} style={{ ...S.btn, background: "transparent", border: "1.5px solid #e8e0d0", color: "#5a5a5a", width: "100%", textAlign: "center", fontSize: 13 }}>
+          Cancel — Keep Current Quantities
+        </button>
+      </div>
+    </div>
+  );
+
+  return null;
+}
+
+// ─── MAIN APP ─────────────────────────────────────────────────────────────────
 export default function App() {
   const [user, setUser] = useState<any>(null);
   const [state, setState] = useState<any>(null);
@@ -128,6 +436,8 @@ export default function App() {
   const [movTypeFilter, setMovTypeFilter] = useState("All");
   const [quickModal, setQuickModal] = useState<{ itemId: string; delta: number } | null>(null);
   const [quickChecker, setQuickChecker] = useState("");
+  // NEW: Inventory count screen flag
+  const [showInventoryCount, setShowInventoryCount] = useState(false);
 
   function showToast(msg: string) { setToast(msg); setTimeout(() => setToast(""), 2500); }
 
@@ -333,6 +643,52 @@ export default function App() {
     a.download = `leosala-inventory-${new Date().toISOString().slice(0, 10)}.json`; a.click(); showToast("💾 Exported!");
   }
 
+  // NEW: Handle inventory count apply
+  function handleInventoryCountApply(counted: Record<string, number>, checker: string) {
+    const countDate = nowStr();
+    updateState((s: any) => {
+      const newItems = s.items.map((i: any) => {
+        if (counted[i.id] !== undefined) {
+          return { ...i, qty: counted[i.id] };
+        }
+        return i;
+      });
+
+      // Build movements for each changed item
+      const newMovements = [...s.movements];
+      s.items.forEach((i: any) => {
+        if (counted[i.id] !== undefined) {
+          const diff = counted[i.id] - i.qty;
+          if (diff !== 0) {
+            newMovements.unshift({
+              id: uid(),
+              type: "adjustment",
+              itemId: i.id,
+              itemName: i.name,
+              warehouse: i.warehouse,
+              qty: Math.abs(diff),
+              notes: `Inventory count${diff > 0 ? " (over)" : " (under)"}`,
+              checker: checker || "",
+              date: countDate,
+            });
+          }
+        }
+      });
+
+      // Also handle full reset (all items set)
+      const allSet = s.items.every((i: any) => counted[i.id] !== undefined);
+      if (allSet && Object.values(counted).every(v => v === 0)) {
+        // Quick reset path — single movement entry
+        return { ...s, items: newItems, movements: newMovements };
+      }
+
+      return { ...s, items: newItems, movements: newMovements };
+    });
+
+    setShowInventoryCount(false);
+    showToast("✅ Inventory count applied!");
+  }
+
   const S: Record<string, React.CSSProperties> = {
     card: { background: "#fff", borderRadius: 12, padding: "16px 18px", boxShadow: "0 2px 16px rgba(45,80,22,.07)", marginBottom: 12 },
     label: { fontSize: 11, fontWeight: 600, color: "#9a9a9a", textTransform: "uppercase", letterSpacing: .7, marginBottom: 5, display: "block" },
@@ -340,6 +696,20 @@ export default function App() {
     btn: { border: "none", borderRadius: 10, padding: "11px 18px", fontFamily: "'DM Sans', sans-serif", fontSize: 13, fontWeight: 700, cursor: "pointer", letterSpacing: .3 },
     sectionTitle: { fontFamily: "'Playfair Display', serif", fontSize: 16, color: "#2d5016", marginBottom: 12, marginTop: 4, display: "block" },
   };
+
+  // Show inventory count screen (full-screen takeover)
+  if (showInventoryCount) return (
+    <>
+      <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet" />
+      <InventoryCountScreen
+        items={items}
+        checkers={checkers}
+        onApply={handleInventoryCountApply}
+        onCancel={() => setShowInventoryCount(false)}
+        S={S}
+      />
+    </>
+  );
 
   return (
     <div style={{ fontFamily: "'DM Sans', sans-serif", background: "#faf7f2", minHeight: "100vh" }}>
@@ -396,6 +766,17 @@ export default function App() {
                 <div style={{ fontSize: 11, color: "#9a9a9a" }}>Items to restock</div>
               </div>
             </div>
+
+            {/* NEW: Inventory Count shortcut on Dashboard */}
+            <div style={{ ...S.card, background: "linear-gradient(135deg,#2d5016,#4a7a28)", border: "none", marginBottom: 16 }}>
+              <div style={{ fontSize: 11, opacity: .7, textTransform: "uppercase", letterSpacing: 1, color: "#fff", marginBottom: 4 }}>Physical Count</div>
+              <div style={{ fontFamily: "'Playfair Display', serif", fontSize: 18, color: "#fff", marginBottom: 6 }}>Start Inventory Count</div>
+              <div style={{ fontSize: 12, color: "rgba(255,255,255,.7)", marginBottom: 14, lineHeight: 1.5 }}>Count your physical stock, compare with app quantities, and update with variance report.</div>
+              <button onClick={() => setShowInventoryCount(true)} style={{ ...S.btn, background: "#ffd166", color: "#2d5016", fontSize: 13, padding: "10px 18px" }}>
+                📋 Start Counting
+              </button>
+            </div>
+
             <span style={S.sectionTitle}>By Warehouse</span>
             {warehouses.map((w: string) => {
               const whItems = items.filter((i: any) => i.warehouse === w);
@@ -434,6 +815,12 @@ export default function App() {
               </div>
               <button style={{ ...S.btn, background: "#2d5016", color: "#fff", width: "100%", textAlign: "center" }} onClick={addItem}>✓ Add Item to Inventory</button>
             </div>
+
+            {/* NEW: Inventory Count button in Inventory tab */}
+            <button onClick={() => setShowInventoryCount(true)} style={{ ...S.btn, background: "transparent", border: "1.5px solid #2d5016", color: "#2d5016", width: "100%", textAlign: "center", marginBottom: 16 }}>
+              📋 Start Inventory Count
+            </button>
+
             <span style={S.sectionTitle}>Inventory List</span>
             <div style={{ display: "flex", gap: 8, overflowX: "auto", scrollbarWidth: "none", marginBottom: 12 }}>
               {["All", ...warehouses].map((w: string) => (
@@ -505,8 +892,6 @@ export default function App() {
                 </div>
                 <div><span style={S.label}>Quantity</span><input style={S.input} type="number" placeholder="0" value={movForm.qty} onChange={e => setMovForm(f => ({ ...f, qty: e.target.value }))} /></div>
               </div>
-
-              {/* Checker */}
               <div style={{ marginBottom: 10 }}>
                 <span style={S.label}>👤 Checker / Person in Charge</span>
                 <select style={{ ...S.input, appearance: "none" }} value={movForm.checker} onChange={e => setMovForm(f => ({ ...f, checker: e.target.value }))}>
@@ -515,7 +900,6 @@ export default function App() {
                 </select>
                 {checkers.length === 0 && <div style={{ fontSize: 11, color: "#9a9a9a", marginTop: 4 }}>Add checkers in ⚙️ Settings first.</div>}
               </div>
-
               <div style={{ marginBottom: 14 }}>
                 <span style={S.label}>Notes / Reason</span>
                 <input style={S.input} placeholder="e.g. Sales, Delivery received..." value={movForm.notes} onChange={e => setMovForm(f => ({ ...f, notes: e.target.value }))} />
@@ -523,7 +907,6 @@ export default function App() {
               <button style={{ ...S.btn, background: "#2d5016", color: "#fff", width: "100%", textAlign: "center" }} onClick={recordMovement}>✓ Record Movement</button>
             </div>
 
-            {/* History Filters */}
             <span style={S.sectionTitle}>Movement History</span>
             <div style={S.card}>
               <div style={{ fontSize: 12, fontWeight: 700, color: "#2d5016", marginBottom: 12, textTransform: "uppercase", letterSpacing: .8 }}>🔍 Filter History</div>
@@ -554,13 +937,11 @@ export default function App() {
                 <button onClick={() => { setMovDateFilter(""); setMovCheckerFilter("All"); setMovTypeFilter("All"); }} style={{ ...S.btn, background: "transparent", color: "#c0392b", border: "1.5px solid #fdecea", width: "100%", textAlign: "center", marginTop: 10, fontSize: 12 }}>✕ Clear All Filters</button>
               )}
             </div>
-
             {(movDateFilter || movCheckerFilter !== "All" || movTypeFilter !== "All") && (
               <div style={{ fontSize: 12, color: "#9a9a9a", marginBottom: 10, textAlign: "center" }}>
                 Showing <strong>{filteredMovements.length}</strong> of {movements.length} movements
               </div>
             )}
-
             {filteredMovements.length === 0
               ? <div style={{ textAlign: "center", padding: "30px 0", color: "#9a9a9a", fontSize: 13 }}>🔄 No movements found for this filter.</div>
               : filteredMovements.slice(0, 100).map((m: any) => <MovRow key={m.id} m={m} />)
@@ -614,7 +995,6 @@ export default function App() {
         {tab === "settings" && (
           <div>
             <br />
-            {/* Warehouses */}
             <div style={S.card}>
               <div style={{ fontSize: 12, fontWeight: 700, color: "#2d5016", marginBottom: 14, textTransform: "uppercase", letterSpacing: .8 }}>🏪 Manage Warehouses</div>
               <div style={{ marginBottom: 14 }}><span style={S.label}>New Warehouse Name</span><input style={S.input} placeholder="e.g. Bodega A" value={newWh} onChange={e => setNewWh(e.target.value)} onKeyDown={e => e.key === "Enter" && addWarehouse()} /></div>
@@ -627,7 +1007,6 @@ export default function App() {
               ))}
             </div>
 
-            {/* Checkers */}
             <div style={S.card}>
               <div style={{ fontSize: 12, fontWeight: 700, color: "#2d5016", marginBottom: 6, textTransform: "uppercase", letterSpacing: .8 }}>👤 Manage Checkers</div>
               <div style={{ fontSize: 12, color: "#9a9a9a", marginBottom: 14 }}>Checkers are people who verify and record stock movements in the bodegas.</div>
@@ -643,7 +1022,6 @@ export default function App() {
                 ))}
             </div>
 
-            {/* Change Password */}
             <div style={S.card}>
               <div style={{ fontSize: 12, fontWeight: 700, color: "#2d5016", marginBottom: 14, textTransform: "uppercase", letterSpacing: .8 }}>🔐 Change Password</div>
               <div style={{ marginBottom: 10 }}>
@@ -663,7 +1041,6 @@ export default function App() {
               <button onClick={changePassword} disabled={pwLoading} style={{ ...S.btn, background: "#2d5016", color: "#fff", width: "100%", textAlign: "center", opacity: pwLoading ? .7 : 1 }}>{pwLoading ? "Saving…" : "🔐 Update Password"}</button>
             </div>
 
-            {/* Data Management */}
             <div style={S.card}>
               <div style={{ fontSize: 12, fontWeight: 700, color: "#2d5016", marginBottom: 14, textTransform: "uppercase", letterSpacing: .8 }}>⚠️ Data Management</div>
               <button onClick={exportData} style={{ ...S.btn, background: "transparent", border: "1.5px solid #e8e0d0", color: "#2d5016", width: "100%", textAlign: "center", marginBottom: 10 }}>💾 Export Data (JSON)</button>
